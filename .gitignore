@@ -142,9 +142,6 @@ vite.config.js.timestamp-*
 vite.config.ts.timestamp-*
 .vite/
 
-# Compiled output of `npm run build`
-lib/
-
 # Generated PDFs, except the committed sample output
 *.pdf
 !samples/*.pdf

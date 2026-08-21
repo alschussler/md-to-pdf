@@ -2,15 +2,14 @@
   "compilerOptions": {
     "target": "esnext",
     "module": "NodeNext",
-    "outDir": "./lib",
-    "rootDir": "./src",
-    "rewriteRelativeImportExtensions": true,
+    "noEmit": true,
+    "allowImportingTsExtensions": true,
     "erasableSyntaxOnly": true,
     "verbatimModuleSyntax": true,
     "skipLibCheck": true,
     "strict": true,
     "types": ["node"]
   },
-  "include": ["src/**/*"],
-  "exclude": ["node_modules", "lib"]
+  "include": ["src/**/*", "test/**/*"],
+  "exclude": ["node_modules"]
 }

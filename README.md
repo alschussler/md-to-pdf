@@ -83,8 +83,7 @@ annotations, and document metadata.
 ```bash
 npm install       # @types/node and typescript, for typechecking only
 npm test          # 43 tests, node:test, no test framework
-npm run typecheck # tsc over src/ and test/
-npm run build     # optional: compile src/ to lib/
+npm run typecheck # tsc --noEmit over src/ and test/
 npm run sample    # regenerate samples/sample.pdf
 ```
 
@@ -94,5 +93,6 @@ its own object header, and walking the outline tree to confirm its hierarchy,
 destinations and `Count` fields.
 
 Running the tool needs nothing installed: `node src/index.ts` works on a bare
-checkout. `npm run build` exists for parity with the other CLIs; `lib/` is gitignored
-because `bin` points straight at the TypeScript entry point.
+checkout. There is no build step — `bin` points straight at the TypeScript entry
+point and Node strips the types, so the only reason to `npm install` is to run the
+typechecker.

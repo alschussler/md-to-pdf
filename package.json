@@ -5,9 +5,8 @@
   "type": "module",
   "bin": "src/index.ts",
   "scripts": {
-    "build": "tsc",
+    "typecheck": "tsc",
     "test": "node --test \"test/*.test.ts\"",
-    "typecheck": "tsc -p tsconfig.test.json",
     "sample": "node src/index.ts samples/sample.md -o samples/sample.pdf"
   },
   "engines": {
