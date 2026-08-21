@@ -1,29 +1,21 @@
 {
   "name": "md-to-pdf",
   "version": "1.0.0",
-  "description": "Markdown to PDF converter with zero runtime dependencies, written in TypeScript and run natively by Node 24",
+  "description": "CLI to convert Markdown into PDF with no runtime dependencies, running TypeScript natively on Node 24",
   "type": "module",
+  "bin": "src/index.ts",
+  "scripts": {
+    "build": "tsc",
+    "test": "node --test \"test/*.test.ts\"",
+    "typecheck": "tsc -p tsconfig.test.json",
+    "sample": "node src/index.ts samples/sample.md -o samples/sample.pdf"
+  },
   "engines": {
     "node": ">=24.0.0"
   },
-  "bin": {
-    "md-to-pdf": "./src/cli.ts"
-  },
-  "scripts": {
-    "start": "node src/cli.ts",
-    "test": "node --test \"test/*.test.ts\"",
-    "sample": "node src/cli.ts samples/sample.md -o samples/sample.pdf",
-    "typecheck": "tsc --noEmit"
-  },
-  "keywords": [
-    "markdown",
-    "pdf",
-    "typescript",
-    "zero-dependency",
-    "commonmark"
-  ],
-  "license": "MIT",
   "devDependencies": {
-    "@types/node": "^26.2.0"
-  }
+    "@types/node": "^24.0.0",
+    "typescript": "^5.0.0"
+  },
+  "license": "MIT"
 }

@@ -1,27 +1,32 @@
 # md-to-pdf
 
-Converts Markdown to PDF with **no dependencies at all** — no headless browser, no
+Converts Markdown to PDF with **no runtime dependencies** — no headless browser, no
 PDF library, no Markdown library, no build step. `src/` is TypeScript that Node 24
 runs directly via its built-in type stripping.
 
 ```bash
-node src/cli.ts README.md -o readme.pdf
-cat notes.md | node src/cli.ts - -o - > notes.pdf
+node src/index.ts README.md -o readme.pdf
+cat notes.md | node src/index.ts - -o - > notes.pdf
 ```
 
-Use the bundled Node version with `nvm use` (see `.nvmrc`).
+Node 24 or newer is required — it is what strips the types. Run `nvm use` to pick up
+the pinned version from `.nvmrc`.
 
 ## How it works
 
-Three layers, each independent:
+Each layer is independent:
 
 | File | Responsibility |
 |:--|:--|
+| `src/index.ts` | Entry point: reads input, wires options into the renderer, writes the PDF. |
+| `src/cli.ts` | Argument parsing via `node:util` `parseArgs`, plus the usage text. |
 | `src/markdown/` | Markdown → AST. `block.ts` scans lines into blocks, `inline.ts` tokenizes spans and resolves emphasis with a delimiter stack. |
 | `src/render.ts` | AST → laid-out pages. Word wrapping, page breaks, tables, decorations, outline entries. |
 | `src/pdf.ts` | Pages → PDF bytes. Indirect objects, Flate-compressed streams, a classic xref table. |
 | `src/fonts.ts` | Base-14 font metrics and WinAnsi encoding, so text advances match what the viewer will do. |
 | `src/images.ts` | PNG and JPEG → PDF image XObjects, using only `node:zlib`. |
+| `src/utils.ts` | Length, margin and page-size parsing. |
+| `src/logger.ts` | TTY-aware coloured output. |
 
 The whole thing avoids embedding fonts by using the 14 typefaces every PDF reader is
 required to provide (Helvetica, Courier, ZapfDingbats). That is why the output of a
@@ -30,21 +35,24 @@ long document is measured in kilobytes rather than megabytes.
 ## Options
 
 ```
--o, --output <file>     Output path (default: input with .pdf; "-" for stdout)
--s, --size <name|WxH>   a3 a4 a5 letter legal tabloid, or 210mmx297mm (default: a4)
--l, --landscape         Swap width and height
--m, --margin <len>      1, 2 or 4 values in CSS order (default: 20mm)
-    --font-size <len>   Base body size (default: 11pt)
-    --line-height <n>   Line height multiplier (default: 1.45)
-    --title <text>      Document title; defaults to the first level-1 heading
-    --author <text>     Author metadata
-    --subject <text>    Subject metadata
-    --no-page-numbers   Drop the footer
-    --no-compress       Leave streams uncompressed, to read the PDF source
--h, --help              Usage
+md-to-pdf <input.md> [options]
+md-to-pdf - -o out.pdf            (read Markdown from stdin)
+
+  -o, --output           Output path, or "-" for stdout (default: input with .pdf)
+  -s, --size             a3, a4, a5, letter, legal, tabloid, or 210mmx297mm
+  -l, --landscape        Swap the page width and height
+  -m, --margin           1, 2 or 4 lengths in CSS order (default: 20mm)
+      --font-size        Base body font size (default: 11pt)
+      --line-height      Line height multiplier (default: 1.45)
+      --title            Document title (default: the first level-1 heading)
+      --author           Document author metadata
+      --subject          Document subject metadata
+      --no-page-numbers  Omit the page-number footer
+      --no-compress      Leave streams uncompressed, to read the generated PDF
+  -h, --help             Show this help message
 ```
 
-Lengths accept `pt` (default), `px` (at 96 dpi), `mm`, `cm` and `in`.
+Lengths accept `pt` (the default), `px` (at 96 dpi), `mm`, `cm` and `in`.
 
 ## Markdown support
 
@@ -70,15 +78,21 @@ annotations, and document metadata.
 - **Inline HTML is dropped**, not rendered; `<br>` becomes a line break.
 - **No syntax highlighting or footnotes.**
 
-## Tests
+## Development
 
 ```bash
-npm test          # 39 tests, node:test, no dependencies
+npm install       # @types/node and typescript, for typechecking only
+npm test          # 43 tests, node:test, no test framework
+npm run typecheck # tsc over src/ and test/
+npm run build     # optional: compile src/ to lib/
+npm run sample    # regenerate samples/sample.pdf
 ```
 
-They cover the parser against known-correct CommonMark results, CLI behaviour, and
+Tests cover the parser against known-correct CommonMark results, CLI behaviour, and
 PDF invariants — including walking the xref table to confirm every offset points at
-its own object header.
+its own object header, and walking the outline tree to confirm its hierarchy,
+destinations and `Count` fields.
 
-`npm run typecheck` additionally needs `npm i -D typescript @types/node`; the source
-is clean under `strict` and `erasableSyntaxOnly`.
+Running the tool needs nothing installed: `node src/index.ts` works on a bare
+checkout. `npm run build` exists for parity with the other CLIs; `lib/` is gitignored
+because `bin` points straight at the TypeScript entry point.

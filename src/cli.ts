@@ -1,217 +1,187 @@
-#!/usr/bin/env node
-import { readFileSync, writeFileSync } from 'node:fs';
-import { basename, dirname, extname, resolve } from 'node:path';
-import { parseMarkdown } from './markdown/block.ts';
-import { plainText } from './markdown/inline.ts';
-import type { Block } from './markdown/types.ts';
-import { DEFAULT_THEME, renderPdf } from './render.ts';
-import type { RenderOptions } from './render.ts';
+import { parseArgs } from "node:util";
+import { basename, dirname, extname, resolve } from "node:path";
 
-const PAGE_SIZES: Record<string, [number, number]> = {
-  a3: [841.89, 1190.55],
-  a4: [595.28, 841.89],
-  a5: [419.53, 595.28],
-  letter: [612, 792],
-  legal: [612, 1008],
-  tabloid: [792, 1224],
+import { parseLength, parseMargins, parsePageSize } from "./utils.ts";
+import type { CliOptions } from "./types.ts";
+
+type CliArgDescription = {
+  type: "string" | "boolean";
+  short?: string;
+  multiple?: boolean;
+  default?: string | boolean | string[] | boolean[];
+  description: string;
 };
 
-const USAGE = `md-to-pdf — convert Markdown to PDF with zero dependencies
+type CliArgs = Record<string, CliArgDescription>;
 
-Usage
-  node src/cli.ts <input.md> [options]
-  cat doc.md | node src/cli.ts - -o doc.pdf
+const ARGS_OPTIONS = {
+  output: {
+    type: "string" as const,
+    short: "o",
+    description:
+      'Output path, or "-" for stdout (default: the input path with a .pdf extension)',
+  },
+  size: {
+    type: "string" as const,
+    short: "s",
+    default: "a4",
+    description:
+      "Page size: a3, a4, a5, letter, legal, tabloid, or an explicit size like 210mmx297mm",
+  },
+  landscape: {
+    type: "boolean" as const,
+    short: "l",
+    default: false,
+    description: "Swap the page width and height",
+  },
+  margin: {
+    type: "string" as const,
+    short: "m",
+    default: "20mm",
+    description: "Page margins: 1, 2 or 4 lengths in CSS order",
+  },
+  "font-size": {
+    type: "string" as const,
+    default: "11pt",
+    description: "Base body font size",
+  },
+  "line-height": {
+    type: "string" as const,
+    default: "1.45",
+    description: "Line height as a multiple of the font size",
+  },
+  title: {
+    type: "string" as const,
+    description: "Document title (default: the first level-1 heading)",
+  },
+  author: {
+    type: "string" as const,
+    description: "Document author metadata",
+  },
+  subject: {
+    type: "string" as const,
+    description: "Document subject metadata",
+  },
+  "no-page-numbers": {
+    type: "boolean" as const,
+    default: false,
+    description: "Omit the page-number footer",
+  },
+  "no-compress": {
+    type: "boolean" as const,
+    default: false,
+    description: "Leave PDF streams uncompressed, to read the generated PDF",
+  },
+  help: {
+    type: "boolean" as const,
+    short: "h",
+    default: false,
+    description: "Show this help message",
+  },
+} satisfies CliArgs;
 
-Options
-  -o, --output <file>     Output path (default: input with .pdf extension, "-" for stdout)
-  -s, --size <name|WxH>   Page size: a3 a4 a5 letter legal tabloid, or 210mmx297mm (default: a4)
-  -l, --landscape         Swap page width and height
-  -m, --margin <len>      Margins; 1, 2 or 4 values, CSS order (default: 20mm)
-      --font-size <len>   Base body font size (default: 11pt)
-      --line-height <n>   Line height multiplier (default: 1.45)
-      --title <text>      Document title (default: first level-1 heading)
-      --author <text>     Document author metadata
-      --subject <text>    Document subject metadata
-      --no-page-numbers   Omit the page footer
-      --no-compress       Write uncompressed streams (useful for inspecting the PDF)
-  -h, --help              Show this help
+export function parseCliArgs(argv: string[]): CliOptions {
+  const args = argv.slice(2);
 
-Lengths accept pt (default), px, mm, cm and in — e.g. 18, 12pt, 15mm, 0.75in.
-`;
-
-function fail(message: string): never {
-  process.stderr.write(`md-to-pdf: ${message}\n`);
-  process.exit(1);
-}
-
-function parseLength(value: string, what: string): number {
-  const match = /^(-?\d*\.?\d+)(pt|px|mm|cm|in)?$/i.exec(value.trim());
-  if (match === null) fail(`invalid length for ${what}: ${value}`);
-  const amount = Number.parseFloat(match[1]);
-  switch ((match[2] ?? 'pt').toLowerCase()) {
-    case 'mm': return (amount * 72) / 25.4;
-    case 'cm': return (amount * 72) / 2.54;
-    case 'in': return amount * 72;
-    case 'px': return amount * 0.75;
-    default: return amount;
+  if (args.length === 0) {
+    printUsage();
+    process.exit(0);
   }
-}
 
-function parseMargins(value: string): [number, number, number, number] {
-  const parts = value.trim().split(/[\s,]+/).map((part) => parseLength(part, 'margin'));
-  switch (parts.length) {
-    case 1: return [parts[0], parts[0], parts[0], parts[0]];
-    case 2: return [parts[0], parts[1], parts[0], parts[1]];
-    case 3: return [parts[0], parts[1], parts[2], parts[1]];
-    case 4: return [parts[0], parts[1], parts[2], parts[3]];
-    default: return fail(`expected 1 to 4 margin values, got ${parts.length}`);
+  const { values, positionals } = parseArgs({
+    args,
+    options: ARGS_OPTIONS,
+    strict: true,
+    allowPositionals: true,
+  });
+
+  if (values.help) {
+    printUsage();
+    process.exit(0);
   }
-}
 
-function parsePageSize(value: string): [number, number] {
-  const named = PAGE_SIZES[value.trim().toLowerCase()];
-  if (named !== undefined) return named;
-  const custom = /^([^x]+)x(.+)$/i.exec(value.trim());
-  if (custom === null) {
-    fail(`unknown page size "${value}" (try ${Object.keys(PAGE_SIZES).join(', ')} or 210mmx297mm)`);
+  if (positionals.length === 0) {
+    throw new Error('An input Markdown file is required (use "-" to read from stdin)');
   }
-  return [parseLength(custom[1], 'page width'), parseLength(custom[2], 'page height')];
-}
+  if (positionals.length > 1) {
+    throw new Error(
+      `Expected a single input file, got ${positionals.length}: ${positionals.join(", ")}`,
+    );
+  }
 
-interface Args {
-  input: string | null;
-  output: string | null;
-  size: [number, number];
-  landscape: boolean;
-  margins: [number, number, number, number];
-  fontSize: number;
-  lineHeight: number;
-  title: string | null;
-  author: string | null;
-  subject: string | null;
-  pageNumbers: boolean;
-  compress: boolean;
-}
+  const input = positionals[0];
+  const [width, height] = parsePageSize(values.size, "--size");
+  const [pageWidth, pageHeight] = values.landscape ? [height, width] : [width, height];
+  const margins = parseMargins(values.margin, "--margin");
+  const [top, right, bottom, left] = margins;
 
-function parseArgs(argv: string[]): Args {
-  const args: Args = {
-    input: null,
-    output: null,
-    size: PAGE_SIZES.a4,
-    landscape: false,
-    margins: parseMargins('20mm'),
-    fontSize: 11,
-    lineHeight: 1.45,
-    title: null,
-    author: null,
-    subject: null,
-    pageNumbers: true,
-    compress: true,
+  if (left + right >= pageWidth || top + bottom >= pageHeight) {
+    throw new Error(
+      `--margin ${values.margin} leaves no room for content on a ` +
+      `${pageWidth.toFixed(0)}x${pageHeight.toFixed(0)}pt page`,
+    );
+  }
+
+  const fontSize = parseLength(values["font-size"], "--font-size");
+  if (fontSize <= 0) {
+    throw new Error(`--font-size requires a positive length, got: ${values["font-size"]}`);
+  }
+
+  const lineHeight = parseFloat(values["line-height"]);
+  if (isNaN(lineHeight) || lineHeight <= 0) {
+    throw new Error(
+      `--line-height requires a positive number, got: ${values["line-height"]}`,
+    );
+  }
+
+  return {
+    input,
+    output: values.output ?? defaultOutput(input),
+    pageWidth,
+    pageHeight,
+    margins,
+    fontSize,
+    lineHeight,
+    pageNumbers: !values["no-page-numbers"],
+    compress: !values["no-compress"],
+    title: values.title,
+    author: values.author,
+    subject: values.subject,
   };
-
-  for (let i = 0; i < argv.length; i++) {
-    const arg = argv[i];
-    const next = (): string => {
-      const value = argv[++i];
-      if (value === undefined) fail(`${arg} requires a value`);
-      return value;
-    };
-
-    switch (arg) {
-      case '-h': case '--help':
-        process.stdout.write(USAGE);
-        process.exit(0);
-      case '-o': case '--output': args.output = next(); break;
-      case '-s': case '--size': args.size = parsePageSize(next()); break;
-      case '-l': case '--landscape': args.landscape = true; break;
-      case '-m': case '--margin': args.margins = parseMargins(next()); break;
-      case '--font-size': args.fontSize = parseLength(next(), 'font size'); break;
-      case '--line-height': args.lineHeight = Number.parseFloat(next()); break;
-      case '--title': args.title = next(); break;
-      case '--author': args.author = next(); break;
-      case '--subject': args.subject = next(); break;
-      case '--no-page-numbers': args.pageNumbers = false; break;
-      case '--no-compress': args.compress = false; break;
-      default:
-        if (arg !== '-' && arg.startsWith('-')) fail(`unknown option ${arg}`);
-        if (args.input !== null) fail(`unexpected extra argument ${arg}`);
-        args.input = arg;
-    }
-  }
-
-  if (!Number.isFinite(args.lineHeight) || args.lineHeight <= 0) fail('--line-height must be a positive number');
-  if (args.fontSize <= 0) fail('--font-size must be positive');
-  return args;
 }
 
-function firstHeading(blocks: Block[]): string | null {
-  for (const block of blocks) {
-    if (block.type === 'heading' && block.level === 1) {
-      const text = plainText(block.children).trim();
-      if (text !== '') return text;
-    }
+function defaultOutput(input: string): string {
+  if (input === "-") {
+    return "-";
   }
-  return null;
+  const absolute = resolve(input);
+  return resolve(dirname(absolute), `${basename(absolute, extname(absolute))}.pdf`);
 }
 
-function main(): void {
-  const args = parseArgs(process.argv.slice(2));
-  if (args.input === null) {
-    process.stdout.write(USAGE);
-    process.exit(1);
+export function printUsage(): void {
+  console.log("");
+  console.log("md-to-pdf — Convert Markdown to PDF with no dependencies");
+  console.log("");
+  console.log("Usage:");
+  console.log("  md-to-pdf <input.md> [options]");
+  console.log("  md-to-pdf - -o out.pdf            (read Markdown from stdin)");
+  console.log("");
+  console.log("Options:");
+  for (const [key, value] of Object.entries(ARGS_OPTIONS) as [
+    string,
+    CliArgDescription,
+  ][]) {
+    const flag = `${value.short ? `-${value.short}, ` : "    "}--${key}`;
+    console.log(`  ${flag.padEnd(21)}  ${value.description}`);
   }
-
-  const fromStdin = args.input === '-';
-  const source = fromStdin
-    ? readFileSync(0, 'utf8')
-    : (() => {
-        try {
-          return readFileSync(resolve(args.input!), 'utf8');
-        } catch (error) {
-          return fail(`cannot read ${args.input}: ${(error as Error).message}`);
-        }
-      })();
-
-  const document = parseMarkdown(source);
-  const [width, height] = args.landscape ? [args.size[1], args.size[0]] : args.size;
-  const [top, right, bottom, left] = args.margins;
-
-  if (left + right >= width || top + bottom >= height) fail('margins leave no room for content');
-
-  const options: RenderOptions = {
-    pageWidth: width,
-    pageHeight: height,
-    marginTop: top,
-    marginRight: right,
-    marginBottom: bottom,
-    marginLeft: left,
-    fontSize: args.fontSize,
-    lineHeight: args.lineHeight,
-    pageNumbers: args.pageNumbers,
-    title: args.title ?? firstHeading(document.blocks),
-    author: args.author,
-    subject: args.subject,
-    baseDir: fromStdin ? process.cwd() : dirname(resolve(args.input!)),
-    compress: args.compress,
-    now: new Date(),
-    theme: DEFAULT_THEME,
-  };
-
-  const { bytes, pages } = renderPdf(document, options);
-
-  const output =
-    args.output ??
-    (fromStdin ? '-' : resolve(dirname(resolve(args.input)), `${basename(args.input, extname(args.input))}.pdf`));
-
-  if (output === '-') {
-    process.stdout.write(bytes);
-    return;
-  }
-
-  writeFileSync(output, bytes);
-  process.stderr.write(
-    `${output} — ${pages} page${pages === 1 ? '' : 's'}, ${(bytes.length / 1024).toFixed(1)} KB\n`,
-  );
+  console.log("");
+  console.log("Lengths accept pt (the default), px at 96 dpi, mm, cm and in.");
+  console.log("");
+  console.log("Examples:");
+  console.log("  md-to-pdf README.md");
+  console.log("  md-to-pdf notes.md -o notes.pdf -s letter -m 1in");
+  console.log("  md-to-pdf report.md --font-size 12pt --line-height 1.6 --title Report");
+  console.log("  md-to-pdf slides.md -s a4 -l --no-page-numbers");
+  console.log("  cat notes.md | md-to-pdf - -o - > notes.pdf");
+  console.log("");
 }
-
-main();

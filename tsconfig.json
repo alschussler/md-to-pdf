@@ -1,18 +1,16 @@
 {
   "compilerOptions": {
-    "target": "ES2023",
-    "lib": ["ES2023"],
-    "module": "nodenext",
-    "moduleResolution": "nodenext",
-    "allowImportingTsExtensions": true,
+    "target": "esnext",
+    "module": "NodeNext",
+    "outDir": "./lib",
+    "rootDir": "./src",
     "rewriteRelativeImportExtensions": true,
     "erasableSyntaxOnly": true,
     "verbatimModuleSyntax": true,
-    "isolatedModules": true,
-    "noEmit": true,
+    "skipLibCheck": true,
     "strict": true,
-    "noUncheckedIndexedAccess": false,
-    "skipLibCheck": true
+    "types": ["node"]
   },
-  "include": ["src/**/*.ts"]
+  "include": ["src/**/*"],
+  "exclude": ["node_modules", "lib"]
 }
