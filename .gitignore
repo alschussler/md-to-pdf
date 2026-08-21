@@ -141,3 +141,7 @@ dist
 vite.config.js.timestamp-*
 vite.config.ts.timestamp-*
 .vite/
+
+# Generated PDFs, except the committed sample output
+*.pdf
+!samples/*.pdf
